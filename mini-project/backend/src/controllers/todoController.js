@@ -1,11 +1,15 @@
 import prisma from "../config/prisma.js";
 
 // ==========================================
-// ১. সব Todo পাওয়া (Prisma findMany)
+// ১. শুধুমাত্র বর্তমান ইউজারের Todo পাওয়া (Normalized Query)
 // ==========================================
 export const getAllTodos = async (req, res) => {
   try {
+    // 🔒 Foreign Key (userId) দিয়ে ফিল্টার করা
     const todos = await prisma.todo.findMany({
+      where: {
+        userId: req.user.id,
+      },
       orderBy: { id: "desc" },
     });
 
@@ -24,7 +28,7 @@ export const getAllTodos = async (req, res) => {
 };
 
 // ==========================================
-// ২. নতুন Todo তৈরি করা (Prisma create)
+// ২. নতুন Todo তৈরি করা (User ID রিলেশন সহ)
 // ==========================================
 export const createTodo = async (req, res) => {
   try {
@@ -37,21 +41,17 @@ export const createTodo = async (req, res) => {
       });
     }
 
-    const creatorUsername = req.user ? req.user.username : "anonymous";
-    const creatorUserId = req.user ? req.user.id : null;
-
-    // Prisma দিয়ে ডেটাবেজে নতুন টাস্ক ইনসার্ট করা
+    // শুধুমাত্র Foreign Key (userId) সেভ হচ্ছে, ডুপ্লিকেট username নয়
     const newTodo = await prisma.todo.create({
       data: {
         title: title.trim(),
-        username: creatorUsername,
-        userId: creatorUserId,
+        userId: req.user.id,
       },
     });
 
     return res.status(201).json({
       success: true,
-      message: "Todo সফলভাবে Supabase ডেটাবেজে সংরক্ষিত হয়েছে!",
+      message: "Todo সফলভাবে সেভ হয়েছে!",
       data: newTodo,
     });
   } catch (error) {
@@ -64,14 +64,13 @@ export const createTodo = async (req, res) => {
 };
 
 // ==========================================
-// ৩. Todo এডিট করা (Prisma update)
+// ৩. Todo এডিট করা (মালিকানা চেক: userId দিয়ে)
 // ==========================================
 export const updateTodo = async (req, res) => {
   try {
     const todoId = parseInt(req.params.id);
     const { title, done } = req.body;
 
-    // Prisma দিয়ে টাস্ক খুঁজে বের করা
     const todo = await prisma.todo.findUnique({
       where: { id: todoId },
     });
@@ -80,6 +79,14 @@ export const updateTodo = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: `ID ${todoId} ওয়ালা কোনো টাস্ক পাওয়া যায়নি!`,
+      });
+    }
+
+    // 🔒 চেক: টাস্কের userId কি বর্তমান ইউজারের id-র সমান?
+    if (todo.userId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "অনধিকার প্রবেশ! আপনি অন্যের টাস্ক এডিট করতে পারবেন না।",
       });
     }
 
@@ -107,7 +114,6 @@ export const updateTodo = async (req, res) => {
       updateData.done = Boolean(done);
     }
 
-    // Prisma দিয়ে ডেটাবেজে আপডেট
     const updatedTodo = await prisma.todo.update({
       where: { id: todoId },
       data: updateData,
@@ -128,7 +134,7 @@ export const updateTodo = async (req, res) => {
 };
 
 // ==========================================
-// ৪. টাস্ক টগল করা (Prisma update)
+// ৪. টাস্ক টগল করা (userId দিয়ে মালিকানা যাচাই)
 // ==========================================
 export const toggleCompleteTodo = async (req, res) => {
   try {
@@ -142,6 +148,13 @@ export const toggleCompleteTodo = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: `ID ${todoId} ওয়ালা কোনো টাস্ক পাওয়া যায়নি!`,
+      });
+    }
+
+    if (todo.userId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "অনধিকার প্রবেশ! আপনি অন্যের টাস্ক টগল করতে পারবেন না।",
       });
     }
 
@@ -165,11 +178,29 @@ export const toggleCompleteTodo = async (req, res) => {
 };
 
 // ==========================================
-// ৫. Todo মুছে ফেলা (Prisma delete)
+// ৫. Todo মুছে ফেলা (userId দিয়ে মালিকানা যাচাই)
 // ==========================================
 export const deleteTodo = async (req, res) => {
   try {
     const todoId = parseInt(req.params.id);
+
+    const todo = await prisma.todo.findUnique({
+      where: { id: todoId },
+    });
+
+    if (!todo) {
+      return res.status(404).json({
+        success: false,
+        message: "টাস্কটি পাওয়া যায়নি!",
+      });
+    }
+
+    if (todo.userId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "অনধিকার প্রবেশ! আপনি অন্যের টাস্ক মুছতে পারবেন না।",
+      });
+    }
 
     await prisma.todo.delete({
       where: { id: todoId },
@@ -182,9 +213,9 @@ export const deleteTodo = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete Todo Error:", error);
-    return res.status(404).json({
+    return res.status(500).json({
       success: false,
-      message: "টাস্কটি পাওয়া যায়নি অথবা ইতিমধ্যে মুছে ফেলা হয়েছে!",
+      message: "টাস্ক মুছে ফেলতে সমস্যা হয়েছে!",
     });
   }
 };

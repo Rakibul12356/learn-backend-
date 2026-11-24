@@ -11,7 +11,7 @@ function App() {
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [toasts, setToasts] = useState([]);
 
-  // Auth স্টেট (Local Storage থেকে চেক)
+  // Auth স্টেট
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('todo_user');
     return saved ? JSON.parse(saved) : null;
@@ -21,7 +21,7 @@ function App() {
   });
 
   // Auth ফর্ম স্টেট
-  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authMode, setAuthMode] = useState('login');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
@@ -38,7 +38,7 @@ function App() {
       method,
       endpoint,
       message,
-      type, // 'get' | 'post' | 'patch' | 'delete' | 'error' | 'warning'
+      type,
       status,
       time: new Date().toLocaleTimeString(),
     };
@@ -54,39 +54,60 @@ function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Auth হেডার পাওয়ার হেল্পার ফাংশন
-  const getAuthHeaders = () => {
+  // Auth হেডার পাওয়ার হেল্পার
+  const getAuthHeaders = (overrideToken = null) => {
+    const activeToken = overrideToken || token;
     const headers = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (activeToken) {
+      headers['Authorization'] = `Bearer ${activeToken}`;
     }
     return headers;
   };
 
-  // ১. সব Todos আনা (GET /api/todos)
-  const fetchTodos = async (showNotification = false) => {
+  // ১. শুধুমাত্র বর্তমান লগইন করা ইউজারের Todos আনা
+  const fetchTodos = async (activeToken = token, showNotification = false) => {
+    // যদি লগইন করা না থাকে, কোনো টাস্ক দেখাবে না
+    if (!activeToken) {
+      setTodos([]);
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_BASE}/todos`);
+      const res = await fetch(`${API_BASE}/todos`, {
+        headers: getAuthHeaders(activeToken),
+      });
+
       const json = await res.json();
-      const data = Array.isArray(json) ? json : json.data || [];
 
-      setTodos(data);
-      setIsBackendConnected(true);
+      if (res.ok) {
+        const data = Array.isArray(json) ? json : json.data || [];
+        setTodos(data);
+        setIsBackendConnected(true);
 
-      if (showNotification) {
-        addToast('GET', '/api/todos', `সফলভাবে ${data.length}টি টাস্ক ব্যাকএন্ড থেকে ফেচ হয়েছে!`, 'get', res.status);
+        if (showNotification) {
+          addToast('GET', '/api/todos', `আপনার অ্যাকাউন্টের ${data.length}টি টাস্ক লোড হয়েছে!`, 'get', res.status);
+        }
+      } else {
+        if (res.status === 401) {
+          // টোকেন অবৈধ হলে লগআউট
+          handleLogout();
+        }
       }
     } catch (err) {
       setIsBackendConnected(false);
       if (showNotification) {
-        addToast('GET', '/api/todos', 'ব্যাকএন্ড অফলাইন!', 'error', 'OFFLINE');
+        addToast('GET', '/api/todos', 'সার্ভার অফলাইন!', 'error', 'OFFLINE');
       }
     }
   };
 
   useEffect(() => {
-    fetchTodos(true);
-  }, []);
+    if (token) {
+      fetchTodos(token, true);
+    } else {
+      setTodos([]);
+    }
+  }, [token]);
 
   // ২. লগইন বা রেজিস্টার হ্যান্ডলার
   const handleAuthSubmit = async (e) => {
@@ -108,11 +129,11 @@ function App() {
       const json = await res.json();
 
       if (res.ok) {
-        const { user, token } = json.data;
+        const { user, token: newToken } = json.data;
         setCurrentUser(user);
-        setToken(token);
+        setToken(newToken);
         localStorage.setItem('todo_user', JSON.stringify(user));
-        localStorage.setItem('todo_token', token);
+        localStorage.setItem('todo_token', newToken);
 
         addToast(
           'POST',
@@ -124,6 +145,9 @@ function App() {
 
         setAuthUsername('');
         setAuthPassword('');
+
+        // নতুন ইউজারের নিজস্ব টাস্ক লোড করা
+        fetchTodos(newToken, false);
       } else {
         addToast(
           'POST',
@@ -145,9 +169,12 @@ function App() {
     const prevName = currentUser?.username;
     setCurrentUser(null);
     setToken(null);
+    setTodos([]); // 🔒 স্ক্রিন থেকে সব টাস্ক মুছে ফেলা
     localStorage.removeItem('todo_user');
     localStorage.removeItem('todo_token');
-    addToast('AUTH', '/api/auth/logout', `@${prevName} সফলভাবে লগআউট হয়েছেন।`, 'warning', 'LOGOUT');
+    if (prevName) {
+      addToast('AUTH', '/api/auth/logout', `@${prevName} সফলভাবে লগআউট হয়েছেন।`, 'warning', 'LOGOUT');
+    }
   };
 
   // ৪. নতুন Todo যোগ করা (POST /api/todos)
@@ -158,7 +185,6 @@ function App() {
       return;
     }
 
-    // যদি লগইন না থাকে, রিকোয়েস্ট আটকে ফ্রন্টএন্ড থেকেই সচেতন করা
     if (!token) {
       addToast('MIDDLEWARE', '/api/todos', '🔒 [401 Unauthorized] টাস্ক যোগ করতে হলে আগে লগইন করতে হবে!', 'error', '401');
       return;
@@ -178,7 +204,7 @@ function App() {
 
       if (res.ok) {
         const newTodo = json.data || json;
-        setTodos((prev) => [...prev, newTodo]);
+        setTodos((prev) => [newTodo, ...prev]);
         addToast('POST', '/api/todos', `টাস্ক "${title}" যোগ হয়েছে!`, 'post', res.status);
       } else {
         addToast('POST', '/api/todos', json.message || 'টাস্ক যোগ ব্যর্থ!', 'error', res.status);
@@ -230,7 +256,7 @@ function App() {
         addToast('PATCH', `/api/todos/${id}`, `টাস্ক এডিট সফল: "${newTitle}"`, 'patch', res.status);
       } else {
         addToast('PATCH', `/api/todos/${id}`, json.message || 'এডিট ব্যর্থ হয়েছে!', 'error', res.status);
-        fetchTodos(false);
+        fetchTodos(token, false);
       }
     } catch (err) {
       addToast('PATCH', `/api/todos/${id}`, 'সার্ভার অফলাইন!', 'error', 'OFFLINE');
@@ -246,7 +272,6 @@ function App() {
 
     const updatedDone = !currentDone;
 
-    // অপটিমিস্টিক আপডেট
     setTodos((prev) =>
       prev.map((t) => (t.id === id ? { ...t, done: updatedDone } : t))
     );
@@ -263,7 +288,7 @@ function App() {
         addToast('PATCH', `/api/todos/${id}/toggle`, `টাস্ক স্ট্যাটাস: ${updatedDone ? 'Completed' : 'Pending'}`, 'patch', res.status);
       } else {
         addToast('PATCH', `/api/todos/${id}/toggle`, json.message || 'স্ট্যাটাস আপডেট ব্যর্থ!', 'error', res.status);
-        fetchTodos(false);
+        fetchTodos(token, false);
       }
     } catch (err) {
       addToast('PATCH', `/api/todos/${id}/toggle`, 'সার্ভার অফলাইন!', 'error', 'OFFLINE');
@@ -346,7 +371,7 @@ function App() {
           </span>
         </div>
         <p className="app-subtitle">
-          Middleware Security: Input Validation, Unique Username & JWT Protection
+          Private User Tasks: এক ইউজারের টাস্ক অন্য ইউজার দেখতে বা এডিট করতে পারবে না
         </p>
 
         {/* Auth স্ট্যাটাস বার অথবা লগইন বক্স */}
@@ -357,7 +382,7 @@ function App() {
                 <span className="user-avatar">👤</span>
                 <div>
                   <strong>@{currentUser.username}</strong>
-                  <span className="auth-tag">Logged In (JWT Guard Active)</span>
+                  <span className="auth-tag">🔒 Private Workspace Active</span>
                 </div>
               </div>
               <button className="btn-logout" onClick={handleLogout}>
@@ -377,7 +402,7 @@ function App() {
                   className={`tab-btn ${authMode === 'register' ? 'active' : ''}`}
                   onClick={() => setAuthMode('register')}
                 >
-                  Register (Unique Username)
+                  Register
                 </button>
               </div>
 
@@ -402,9 +427,6 @@ function App() {
                   {authLoading ? '...' : authMode === 'register' ? 'Create Account' : 'Sign In'}
                 </button>
               </form>
-              <div className="auth-hint">
-                💡 <em>ডেমো ইউজার: <code>rakib</code> | পাসওয়ার্ড: <code>password123</code> অথবা নতুন রেজিস্টার করুন।</em>
-              </div>
             </div>
           )}
         </div>
@@ -412,18 +434,18 @@ function App() {
         {/* API রুট কার্ড */}
         <div className="api-badge-card">
           <div className="badge-card-header">
-            <strong>🎯 Middleware Protected Routes:</strong>
-            <button className="btn-refresh-api" onClick={() => fetchTodos(true)}>
+            <strong>🎯 User-Specific Security Routes:</strong>
+            <button className="btn-refresh-api" onClick={() => fetchTodos(token, true)}>
               🔄 Re-fetch
             </button>
           </div>
           <div className="endpoint-list">
             <span className="ep-tag ep-post">POST /api/auth/register</span>
             <span className="ep-tag ep-post">POST /api/auth/login</span>
-            <span className="ep-tag ep-get">GET /api/todos (Public)</span>
+            <span className="ep-tag ep-get">GET /api/todos [🔒 My Todos Only]</span>
             <span className="ep-tag ep-post">POST /api/todos [🔒 Auth]</span>
-            <span className="ep-tag ep-patch">PATCH /api/todos/:id [🔒 Auth]</span>
-            <span className="ep-tag ep-del">DELETE /api/todos/:id [🔒 Auth]</span>
+            <span className="ep-tag ep-patch">PATCH /api/todos/:id [🔒 Owner Only]</span>
+            <span className="ep-tag ep-del">DELETE /api/todos/:id [🔒 Owner Only]</span>
           </div>
         </div>
       </header>
@@ -436,12 +458,13 @@ function App() {
           placeholder={
             currentUser
               ? `@${currentUser.username} হিসেবে নতুন কাজ লিখুন...`
-              : 'টাস্ক যোগ করার জন্য প্রথমে উপরে লগইন করুন 🔒'
+              : 'নিজের টাস্ক দেখতে বা যোগ করতে প্রথমে উপরে লগইন করুন 🔒'
           }
           value={inputTitle}
           onChange={(e) => setInputTitle(e.target.value)}
+          disabled={!currentUser}
         />
-        <button type="submit" className="btn-add">
+        <button type="submit" className="btn-add" disabled={!currentUser}>
           + Add Todo
         </button>
       </form>
@@ -470,16 +493,21 @@ function App() {
         </div>
 
         <div className="todo-stats">
-          {completedCount} of {todos.length} completed
+          {currentUser ? `${completedCount} of ${todos.length} completed` : 'লগইন করুন'}
         </div>
       </div>
 
       {/* টাস্কের লিস্ট */}
       <div className="todo-list">
-        {filteredTodos.length === 0 ? (
+        {!currentUser ? (
+          <div className="empty-state">
+            <div className="empty-icon">🔒</div>
+            <p>আপনার ব্যক্তিগত টাস্কগুলো দেখতে অনুগ্রহ করে প্রথমে লগইন করুন!</p>
+          </div>
+        ) : filteredTodos.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📝</div>
-            <p>কোনো টাস্ক পাওয়া যায়নি!</p>
+            <p>@{currentUser.username}-এর কোনো টাস্ক নেই! উপরে লিখে নতুন টাস্ক যোগ করুন।</p>
           </div>
         ) : (
           filteredTodos.map((todo) => {
@@ -536,9 +564,6 @@ function App() {
                     onClick={() => handleToggleTodo(todo.id, todo.done)}
                   >
                     <span className="todo-title">{todo.title}</span>
-                    {todo.username && (
-                      <span className="todo-author">by @{todo.username}</span>
-                    )}
                   </div>
                 )}
 

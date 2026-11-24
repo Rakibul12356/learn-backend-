@@ -22,14 +22,13 @@ model User {
   @@map("users")
 }
 
-// ২. Todo মডেল
+// ২. Todo মডেল (Normalized: ডুপ্লিকেট username বাদ দিয়ে শুধু Foreign Key userId রাখা হলো)
 model Todo {
   id        Int      @id @default(autoincrement())
   title     String
   done      Boolean  @default(false)
-  username  String
-  userId    Int?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   @@map("todos")

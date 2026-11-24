@@ -10,20 +10,23 @@ import { requireAuth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// ১. GET /api/todos — সব Todo দেখা (সবার জন্য উন্মুক্ত)
+// 🔒 Todo-র সব রুটে ঢোকার জন্য অবশ্যই লগইন (requireAuth) থাকতে হবে!
+// এক ইউজার অন্য ইউজারের ডেটা দেখতে বা এডিট করতে পারবে না।
+router.use(requireAuth);
+
+// ১. GET /api/todos — শুধুমাত্র বর্তমান ইউজারের Todo লিস্ট আনা
 router.get("/", getAllTodos);
 
-// 🔒 নিচের সব রুটে ঢোকার জন্য অবশ্যই লগইন (requireAuth) থাকতে হবে!
-// ২. POST /api/todos — নতুন Todo যোগ করা
-router.post("/", requireAuth, createTodo);
+// ২. POST /api/todos — বর্তমান ইউজারের জন্য নতুন Todo যোগ করা
+router.post("/", createTodo);
 
-// ৩. PATCH /api/todos/:id — Todo এডিট করা
-router.patch("/:id", requireAuth, updateTodo);
+// ৩. PATCH /api/todos/:id — বর্তমান ইউজারের Todo এডিট করা
+router.patch("/:id", updateTodo);
 
-// ৪. PATCH /api/todos/:id/toggle — Complete/Incomplete টগল করা
-router.patch("/:id/toggle", requireAuth, toggleCompleteTodo);
+// ৪. PATCH /api/todos/:id/toggle — বর্তমান ইউজারের Todo টগল করা
+router.patch("/:id/toggle", toggleCompleteTodo);
 
-// ৫. DELETE /api/todos/:id — Todo মুছে ফেলা
-router.delete("/:id", requireAuth, deleteTodo);
+// ৫. DELETE /api/todos/:id — বর্তমান ইউজারের Todo মুছে ফেলা
+router.delete("/:id", deleteTodo);
 
 export default router;
